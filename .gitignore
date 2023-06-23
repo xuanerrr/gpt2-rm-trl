@@ -1,0 +1,4 @@
+wandb/
+save_pretrained/
+save_model/
+*.log

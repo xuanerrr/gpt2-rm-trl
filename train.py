@@ -197,3 +197,100 @@ for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
 model.save_pretrained('/data/wenxuan.gao/work2/save_pretrained')
 tokenizer.save_pretrained('/data/wenxuan.gao/work2/save_pretrained')
 
+'''
+def train_process():
+    for epoch, batch in tqdm(enumerate(ppo_trainer.dataloader)):
+        logs, timing = dict(), dict()
+        t0 = time.time()
+
+        query_tensors = batch['input_ids']
+    
+        model.gradient_checkpointing_disable()
+        model.pretrained_model.config.use_cache = True
+    
+        #### Get response from gpt2
+        t = time.time()
+        response_tensors = []
+        for query in query_tensors:
+            gen_len = output_length_sampler()
+            generation_kwargs["max_new_tokens"] = gen_len
+            response = ppo_trainer.generate(query, **generation_kwargs)
+            response_tensors.append(response.squeeze()[-gen_len:])
+        batch['response'] = [tokenizer.decode(r.squeeze()) for r in response_tensors]
+        timing['time/get_response'] = time.time() - t
+
+        #### Compute sentiment score
+        t = time.time()
+        texts = [q + r for q,r in zip(batch['query'], batch['response'])]
+        pipe_outputs = sentiment_pipe(texts, **sent_kwargs)
+        rewards = [torch.tensor(output[1]["score"]) for output in pipe_outputs] 
+        # print(rewards)
+        #若一个prompt目前是negative,它的positive score是-0.5，那么加到奖励里面，相当于让它少学这个
+        timing['time/get_sentiment_preds'] = time.time()-t
+    
+        model.gradient_checkpointing_enable()
+        model.pretrained_model.config.use_cache = False
+    
+        #### Run PPO step 
+        t = time.time()
+        stats = ppo_trainer.step(query_tensors, response_tensors, rewards)
+        timing['time/PPOoptimization'] = time.time()-t
+    
+        # ppo_trainer.log_stats(stats, batch, rewards)
+        if not isinstance(rewards, torch.Tensor):
+            rewards = torch.tensor(rewards).to(device)
+
+
+        #### Log everything
+        timing['time/epoch'] = time.time()-t0
+        table_rows = [list(r) for r in zip(batch['query'], batch['response'], rewards.cpu().tolist())]
+        logs.update({'game_log': wandb.Table(columns=['query', 'response', 'reward'], rows=table_rows)})
+        logs.update(timing)
+        logs.update(stats)
+        logs["env/reward_mean"] = torch.mean(rewards).cpu().numpy().item()
+        logs["env/reward_std"] = torch.std(rewards).cpu().numpy().item()
+        logs["env/reward_dist"] = rewards.cpu().numpy()
+        wandb.log(logs)
+
+
+    model.save_pretrained('/data/wenxuan.gao/work2/save_pretrained')
+    tokenizer.save_pretrained('/data/wenxuan.gao/work2/save_pretrained')
+
+'''
+
+# #### get a batch from the dataset
+# bs = 16
+# game_data = dict()
+# dataset.set_format("pandas")
+# df_batch = dataset[:].sample(bs)
+# game_data['query'] = df_batch['query'].tolist()
+# query_tensors = df_batch['input_ids'].tolist()
+
+# response_tensors_ref, response_tensors = [], []
+
+# #### get response from gpt2 and gpt2_ref
+# for i in range(bs):
+#     gen_len = output_length_sampler()
+#     output = ref_model.generate(torch.tensor(query_tensors[i]).unsqueeze(dim=0).to(device),
+#                                      max_new_tokens=gen_len, **gen_kwargs).squeeze()[-gen_len:]
+#     response_tensors_ref.append(output) # 
+# #     output = model.generate(torch.tensor(query_tensors[i]).unsqueeze(dim=0).to(device),
+# #                                  max_new_tokens=gen_len, **gen_kwargs).squeeze()[-gen_len:]
+#     output = ppo_trainer.generate(torch.tensor(query_tensors[i]).to(device),
+#                                  max_new_tokens=gen_len, **gen_kwargs).squeeze()[-gen_len:]
+#     response_tensors.append(output)
+
+# #### decode responses
+# game_data['response (before)'] = [tokenizer.decode(response_tensors_ref[i]) for i in range(bs)]
+# game_data['response (after)'] = [tokenizer.decode(response_tensors[i]) for i in range(bs)]
+
+# #### sentiment analysis of query/response pairs before/after
+# texts = [q + r for q,r in zip(game_data['query'], game_data['response (before)'])]
+# game_data['rewards (before)'] = [output[1]["score"] for output in sentiment_pipe(texts, **sent_kwargs)]
+
+# texts = [q + r for q,r in zip(game_data['query'], game_data['response (after)'])]
+# game_data['rewards (after)'] = [output[1]["score"] for output in sentiment_pipe(texts, **sent_kwargs)]
+
+# # store results in a dataframe
+# df_results = pd.DataFrame(game_data)
+# df_results
